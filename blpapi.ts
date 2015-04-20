@@ -309,31 +309,27 @@ export class Session extends events.EventEmitter {
                       execute: (correlatorId: number) => void,
                       callback: IRequestCallback): void
     {
-        // TODO: Review all calls to 'validateSession' which throws bypassing
-        // the expected error reporting mechanism.
-        try {
-            this.validateSession();
-        } catch (ex) {
-            callback(ex);
-            return;
-        }
+        Promise.coroutine(function * (session: Session): any {
+            try {
+                session.validateSession();
+                var correlatorId = session.nextCorrelatorId();
+                session.requests[correlatorId] = callback;
 
-        var correlatorId = this.nextCorrelatorId();
-        this.requests[correlatorId] = callback;
-
-        this.openService(uri).then((): void => {
-            log(util.format('Request: %s|%d', requestName, correlatorId));
-            trace(request);
-            execute(correlatorId);
-            assert(requestName in REQUEST_TO_RESPONSE_MAP,
-                   util.format('Request, %s, not handled', requestName));
-            this.listen(REQUEST_TO_RESPONSE_MAP[requestName],
-                        correlatorId,
-                        this.requestHandler.bind(this, callback));
-        }).catch((ex: Error): void => {
-            delete this.requests[correlatorId];
-            callback(ex);
-        });
+                // XXX Capture the return of yield so that tslint doesn't complain.
+                var dummy = yield session.openService(uri);
+                log(util.format('Request: %s|%d', requestName, correlatorId));
+                trace(request);
+                execute(correlatorId);
+                assert(requestName in REQUEST_TO_RESPONSE_MAP,
+                       util.format('Request, %s, not handled', requestName));
+                session.listen(REQUEST_TO_RESPONSE_MAP[requestName],
+                            correlatorId,
+                            session.requestHandler.bind(session, callback));
+            } catch (ex) {
+                delete session.requests[correlatorId];
+                callback(ex);
+            }
+        })(this);
     }
 
     // PRIVATE ACCESSORS
